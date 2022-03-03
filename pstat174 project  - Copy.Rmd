@@ -1,0 +1,548 @@
+---
+title: "Determine the model for the quarterly electricity production in Australia from 1956 to 2010"
+author: "Yifan Qian"
+date: "2020/6/5"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+<font size="6">Abstract</font>
+
+In this project, I aim to determine the appropriate model for the electrcial production in Australia from 1956 to 2010 and apply this model to predict the future eletricity production in Australia.We focus on analysing the training part of the dataset to  determine the model. The final model is determined through Box-cox transformation, differenecing, checking the significant lags in ACF and PACF, applying parsimony princple and other techiniques. We also have the diagnostic process and forecasting. It turns out that this dataset is following a sarima model and the diagnostics show those data may have non-linear dependence overall. 
+
+<font size="6">Introduction </font>
+
+We are curious about the trend of people's consumption of electricity in Australia over time and infer their dependence on electricity. Since electricity is an eneregy form that can't be stored, the production of electricity approximately equals to the consumption of electricity.The dataset "qauselec" we use is from Australian Bureau of Statistics and it descirbes the quarterly eletricity production in Australia from 1956 to 2010. This dataset is important because it has a long duraton record. Also, the quarterly records are rational due to different demand of electricity in different seasons. 
+
+We try to forecast the future production of electricity in Australia based on the final model we choose through identifying candidate models, estiamting model parameters and diagnostic checking.We conclues that electricity production in Australia turns out be an upward trend and fluctuates with seasons. 
+
+
+<font size = "6">Plot of raw data</font>                  
+```{r raw data, echo=FALSE}
+qauselec.csv=read.table("qauselec.csv",
+                    sep=",",header=FALSE, skip=1, nrows=218)  #import data 
+qauselec=ts(qauselec.csv[,3]) 
+tsdat<-ts(qauselec.csv[,3],start=c(1956,1),frequency=4)
+ts.plot(tsdat,main="Raw Data")  #plot raw data 
+plot(qauselec,main="Raw Data with mean and trend ");abline(lm(qauselec~as.numeric(1:length(qauselec))),col="red");abline(h=mean(qauselec),col="blue") #plot raw data with mean and trend
+```
+
+We need to divide the dataset into two parts for model training and model test, and we work with the training set.
+
+```{r echo=FALSE}
+qt<-qauselec[c(1:206)] #set training data set
+q.test<-qauselec[c(207:218)]  #set testing data set 
+plot.ts(qt,main="training data with mean and trend");abline(lm(qt~as.numeric(1:length(qt))),col="red");abline(h=mean(qauselec),col="blue") #plot training data with mean and trend
+```
+
+From the graph of training dataset, we can observe that this dataset is non-stationary and follows a linear trend. Also, the dataset follows seasonal patterns. Last, we can observe as the time moves on, its mean and variance grows, which means it has non-constant of variance and mean.
+
+```{r }
+hist(qt,col="light blue",xlab="",main="histogram;electricity production data") #plot histogram of training data 
+acf(qt,lag.max=40,main="ACF of the electricity production data") #plot acf of training data 
+```
+
+
+The histogram plotted is badly skewed and the acf of cement production data is quite large,which conforms the non-stationarity of truncated data.
+
+
+<font size="6">Use box-cox transformation to remove the non-constant variance of original data</font>
+
+```{r echo=FALSE}
+library(MASS)
+bcTransform<-boxcox(qt~as.numeric(1:length(qt)),plotit=TRUE) # plot box-cox graph
+lambda=bcTransform$x[which(bcTransform$y==max(bcTransform$y))] # compute the lambda value
+qt.bc=(1/lambda)*(qt^lambda-1) # box-cox transformation 
+```
+
+From the graph, the maximum likelihood of box-cox lambda is 2/3. Therefore, we box-cox transform the data with power of 2/3.
+```{r variance}
+var(qt)# variance of original data 
+var(qt.bc) # variance of box-cox transformed data 
+```
+
+Variance of box-cox transformed data is significantly lower than that of original data.
+```{r }
+op<-par(mfrow=c(1,2))
+ts.plot(qt,main="Original data",ylab=expression(X[t])) 
+ts.plot(qt.bc,main="Box-Cox transformed data", ylab=expression(Y[x]))  #plot box-cox transformed data time series graph
+hist(qt,col="light blue", xlab="",main="histogram;qt") 
+hist(qt.bc,col="light blue", xlab="",main="histogram;bc(qt)")  #plot box-cox transfored data hisgrtam 
+```
+
+Compaing the time series plots of the original data and box-cox transformed data, the variance in transformed data becomes more constant and the transformed data gives a more symmetric histogram. Therefore, it's appropriate for us to choose box-cox transformed data with lambda equal to 2/3.
+
+<font size="6">Use differencing to remove the trend and sesonality of original data</font>
+
+```{r }
+qt.bc_4<-diff(qt.bc,lag=4)  #difference data at lag 4
+plot.ts(qt.bc_4,main="bc(qt) differenced at lag 4");abline(lm(qt.bc_4~as.numeric(1:length(qt.bc_4))),col="red");abline(h=mean(qt.bc_4,col="blue"))  #plot differenced data at lag 4
+var(qt.bc)
+var(qt.bc_4) #variance of differenced data at lag 4 
+```
+
+we use lag 4 to remove the seasonality of the data since the data is recorded quarterly. The differenced graph dooen't have apparent seasonality. Its variance is lower than the orginal grpah. The differenced graph still have a little bit trend and we need to remove it. 
+
+```{r }
+qt.stat<-diff(qt.bc_4,lag=1) # difference data at lag 4 and lag 1 
+plot.ts(qt.stat,main="bc(qt) differenced at lag 4 and lag 1");abline(lm(qt.stat~as.numeric(1:length(qt.stat))),col="red");abline(h=mean(qt.stat,col="blue")) # plot differenced data at lag 4 and lag1
+var(qt.stat) #variance of differenced data at lag 4 and lag 1 
+```
+
+we use lag 1 to remove the trend of the data. Its plot differenced at lag 4 and lag 1 shows no seasonality. The variance is even lower than the graph only differened at lag 4. Also, there is no trend in the plot.
+
+```{r }
+op<-par(mfrow=c(1,2))
+acf(qt.bc,lag.max=40,main="ACF of the bc(qt)") #acf of box-cox transformed data 
+acf(qt.bc_4,lag.max=40,main="ACF of the bc(qt),differenced at 4") #acf of differenced data at lag 4
+par(op)
+acf(qt.stat,lag.max=40,main="ACF of the bc(qt), differenced at 4 and 1")  #acf of differenced data at lag 4 and lag 1 
+
+```
+
+From the ACF graphs plotted, we can notice that the ACF of orginal data decays slowly and fluctuates periodically, which shows its non-stationary and seasonality. The second ACF of data differenced at 4 fluctuates periodically and decays, which means a non-stationary process. The last ACF of data differenced at 4 and 1 corresponds to a stationary process.
+
+```{r }
+op<-par(mfrow=c(1,2))
+hist(qt.bc,col="light blue", xlab="",main="histogram;bc(qt)") #histogram of differenced data at lag 4
+hist(qt.stat,col="light blue",xlab="", main="histogram;differenced bc(qt)") #histogram of differenced data at lag 4 and lag 1 
+par(op)
+```
+
+Comparing two histograms of original data and differenced data, histogram of differenced data looks more symmetric and we can conclude that our transformation and differencing is appropriate. 
+
+<font size="6">Determining candidate model by checking lags in ACF and PACF</font>
+```{r }
+acf(qt.stat,lag.max=40,main="ACF of the bc(qt), differenced at 4 and 1") # plot acf and check significant lag in acf 
+pacf(qt.stat,lag.max=40,main="PACF of the bc(qt), differenced at 4 and 1") # plot pacf and check significant lag in pacf
+```
+
+We can identify the fitted SARIMA model based on ACF and PACF of transformed data differernced at lag 4 and lag 1. Since we apply one seasonal differencing so D=1 at lag s=4.
+
+To model the seasonal part (P,D,Q),we focus on the seasonal lags h=1s,2s,etc. Since we apply one seasonal differencing so D=1 at lag s=4. The ACF shows a strong peak at h=1s and a small peak at h=2s. A good choice for the MA part would be Q= 1 or Q=2. The PACF shows two strongs peaks at h=1s,2s. A good choice for the AR part would be P=1 or P=2.
+
+To model the non-seasonal part (p,d,q),we focus on the within season lags,h=1,2,3,4.Since we apply one differencing to remove the trend, d=1. The ACF shows a strong peak at h=1. A good choice for the MA part would be q=1. The PACF s strong peak at h=1. A good choice for the AR part would be p=1. 
+
+List of candidate models to try: SARIMA for bc(qt): s=4, D=1,d=1;Q=1 or 2;P=1 or 2; q=1; p=1
+
+<font size="6">Estimating the parameters of possible pure SMA models </font>
+```{r incldue=False}
+library(qpcR)
+arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,1),period=4),method="ML")  #estimate SMA model coefficient 
+AICc(arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,1),period=4),method="ML")) # compute AICc of particular SMA model
+arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,2),period=4),method="ML")
+AICc(arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,2),period=4),method="ML"))
+```
+
+We first tried SMA model and find the AICc when q=1 and Q=1 is lower. None of the coeffcient falls into the confidence interval of 0.
+
+<font size="6">Estimating the parameters of possible pure SAR models </font>
+```{r }
+arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(1,1,0),period=4),method="ML")  #estimate SAR model coefficient
+AICc(arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(1,1,0),period=4),method="ML"))# compute AICc of particular SAR model
+arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(2,1,0),period=4),method="ML")
+AICc(arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(2,1,0),period=4),method="ML"))
+```
+
+We then tried SAR model and find their AICc are all larger than the AICc of pure SMA model. None of the coeffcient falls into the confidence interval of 0 
+
+<font size="6">Estimating the parameters of possible SARIMA models </font>
+```{r }
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),method="ML")#estimate SARIMA model coefficient
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),method="ML"))# compute AICc of particular SARIMA model
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),fixed=c(NA,NA,0,NA),method="ML") # estimate fixed SARIMA model coefficient 
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),fixed=c(NA,NA,0,NA),method="ML")) # compute AICc of fixed SARIMA model 
+```
+
+Since SAR1 coefficent in SARIMA(1,1,1)(1,1,1)<sub>4</sub>model is within the confidence interval of 0. We fixed the coeffcient to 0 and find the fixed SARIMA model has lower AICc value than the original model.
+
+```{r }
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,2),period=4),method="ML")
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,2),period=4),method="ML"))
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,1),period=4),method="ML")
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,1),period=4),method="ML"))
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,2),period=4),method="ML")
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,2),period=4),method="ML"))
+```
+
+All SARIMA models have lower AICc than pure SMA or SAR models, which means the final model is likely to be a SARIMA model.Within the SARIMA models, AICc is lowest with (p,d,q)=(1,1,1) and (P,D,Q)=(2,1,2). The second lowest AICc is SARIMA with (p,d,q)=(1,1,1) and (P,D,Q)=(2,1,1), Therefore, these two models become the candidate for final models.
+
+suppose Y = (1-B)(1-(B^4))bc(X) = (1-B)(1-(B^4)(3/2)*((X^2/3)-1)
+
+The algebraic form of model A is (1-0.461<sub>(0.2012)</sub>B)(1-0.479<sub>(0.2965)</sub>(B^4) +0.2663<sub>(0.1410)</sub>(B^8)) Y=(1-0.7623<sub>(0.2012)</sub>B)(1-1.175<sub>(0.3184)</sub>(B^4) +0.5144<sub>(0.1738)</sub>(B^8))Z<sub>t</sub> with $\sigma_{t}$^2=0.02619
+
+The algebraic form of model B is  (1-0.5606<sub>(0.1410)</sub>B)(1+0.1748<sub>(0.1220)</sub>(B^4) +0.2144<sub>(0.0911)</sub>(B^8)) Y=(1-0.8686<sub>(0.1017)</sub>B)(1-0.4587<sub>(0.1119)</sub>(B^4))Z<sub>t</sub>  with $\sigma_{t}$^2=0.02688
+
+<font size = "6"> Check the invertibility and stationarity of these two models.</font>
+
+```{r }
+library(UnitCircle)
+uc.check(pol_=c(1,-1.175,0.5144),plot_output=TRUE) #check roots of SMA part in model A 
+```
+
+Model(A) is invertible since all roots of SMA part are outside the unit circle and |$\theta_{1}$|< 1.
+
+```{r }
+uc.check(pol_=c(1,-0.479,0.2663),plot_output=TRUE) # check roots of SAR part in model A 
+```
+
+Model (A) is stationary since all roots of SAR part are outside the unit circle and |$\phi_{1}$|< 1. 
+```{r }
+uc.check(pol_=c(1,0.1748,0.2144),plot_output=TRUE) #check roots of SAR part in model B
+```
+
+Model (B) is stationary since all roots of SAR part are outside the unit circle and |$\phi_{1}$|< 1, it is also invertible since  |$\theta_{1}$| < 1 and |$\Theta_{1}$|< 1.
+
+Overall, model A and model B are all invertible and stationary.
+
+<font size = "6"> Diagnostic checking of model A </font>
+```{r }
+fit<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,2),period=4),method="ML")
+res<-residuals(fit)
+m<-mean(res)
+std<-sqrt(var(res))
+hist(res,density=20,breaks=20,col="blue",xlab="",prob=TRUE,main="histogram of residuals");curve(dnorm(x,m,std),add=TRUE) #plot the histogram of residuals in model A 
+plot.ts(res);abline(lm(res~as.numeric(1:length(res))),col="red");abline(h=mean(res),col="blue")# plot the time-series graph of residuals in model A 
+qqnorm(res,main="Normal Q-Q Plot for model A");qqline(res,col="blue") # plot the norm Q-Q plot
+```
+
+The histogram looks quite symmetric and the q-q plot form a stragiht line. Also, from the time series graph, there is no trend, change of variance or seasonality for the residuals. The mean of residuals is -0.001433233, which is quite close to 0. Overall, these three graphs all fit well. 
+
+```{r }
+op<-par(mfrow=c(1,2))
+acf(res,lag.max=40,main="ACF of res_A") #plot acf of residuals in model A 
+pacf(res,lag.max=40,main="PACF of res_A") #plot acf of residuals in model A 
+par(op)
+```
+
+From the graph, all ACF and PACF are within the confidence interval and can be counted as 0
+
+```{r }
+shapiro.test(res) #shapiro test of model A 
+Box.test(res, lag = 15 , type = c("Box-Pierce"), fitdf = 2)  # Box-Pierce test of model A 
+Box.test(res, lag = 15, type = c("Ljung-Box"), fitdf = 2) # Ljung-Box test of model A 
+Box.test(res^2, lag = 15, type = c("Ljung-Box"), fitdf = 0) # Mcleod-Li tst of model A 
+```
+
+Model A passes shapiro test, Box-Pierce test and Ljung-Box test because their P-values are all larger than 0.05. However, it doesn't pass Mcleod-Li test. Therefore, residuals in model A have normality but they probably have non-linear dependence. 
+
+```{r }
+acf(res^2,lag.max=40) # plot acf of residual sqaure of model A 
+ar(res, aic = TRUE, order.max = NULL, method = c("yule-walker")) #estimate the model of residuals using yule-walker method 
+```
+
+We observe several significant lags in acf of residuals squares, which confirms that residuals have non-linear dependence. Through yule-walker estimation, we can fit the residuals to AR(0), which shows the residuals can be fitted to white noise. 
+
+<font size = "6"> Diagnostic checking of model B </font>
+```{r }
+fitt<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,1),period=4),method="ML")
+ress<-residuals(fitt)
+m<-mean(ress)
+std<-sqrt(var(ress))
+hist(ress,density=20,breaks=20,col="blue",xlab="",prob=TRUE);curve(dnorm(x,m,std),add=TRUE)
+plot.ts(ress);abline(lm(ress~as.numeric(1:length(ress))),col="red");abline(h=mean(ress),col="blue")
+qqnorm(ress,main="Normal Q-Q Plot for model B");qqline(ress,col="blue")
+```
+Similar to model A, The histogram of model B is symmetric and the q-q plot of model B form a stragiht line. Also, from the time series graph, there is no trend, change of variance or seasonality for the residuals. The mean of residuals is -0.00023735, which is quite close to 0. Overall, these three graphs also fit well in model B. 
+
+```{r }
+op<-par(mfrow=c(1,2))
+acf(ress,lag.max=40)
+pacf(ress,lag.max=40)
+par(op)
+```
+
+From the graph, all ACF and PACF of model B are also within the confidence interval and can be counted as 0. 
+```{r }
+shapiro.test(ress)
+Box.test(ress, lag = 15 , type = c("Box-Pierce"), fitdf = 2)
+Box.test(ress, lag = 15, type = c("Ljung-Box"), fitdf = 2)
+Box.test(ress^2, lag = 15, type = c("Ljung-Box"), fitdf = 0)
+```
+
+Different from model A, model B doesn't pass shapiro test since its P-value is less than 0.05, which means the residuals in model B doesn't have normality. The other three portmanteau tests are the same results with model A. The residuals also have non-linear dependence since it fails the Mcleod-Li test. 
+```{r }
+acf(ress^2,lag.max=40)
+ar(ress, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+```
+
+In model B, we can also fit the residuals to AR(0), which means the White Noise. 
+
+Overall, Model A passed all diagnostic checking except Mcleod-Li test, Model B passed all diagnostic chekcing except Shapiro-test and Mcleod-Li test. The final model we choose is box-cox transformed data: bc(qt) follows SARIMA (1,1,1)(2,1,2)<sub>4</sub> model. 
+
+S uppose Y = (1-B)(1-(B^4))bc(X) = (1-B)(1-(B^4)(3/2)*((X^2/3)-1)
+
+(1-0.461<sub>(0.2012)</sub>B)(1-0.479<sub>(0.2965)</sub>(B^4) +0.2663<sub>(0.1410)</sub>(B^8)) Y=(1-0.7623<sub>(0.2012)</sub>B)(1-1.175<sub>(0.3184)</sub>(B^4) +0.5144<sub>(0.1738)</sub>(B^8))Z<sub>t</sub> with $\sigma_{t}$^2=0.02619
+
+<font size = "6"> Forecasting based on the final model </font>
+```{r forecast}
+library(forecast)
+fit.A<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,2),period=4),method="ML") #fit our final model 
+forecast(fit.A)  
+pred.tr<-predict(fit.A,n.ahead=12) # forecast 12 data points 
+U.tr=pred.tr$pred+2*pred.tr$se #set upper bond of transforemd data 
+L.tr=pred.tr$pred-2*pred.tr$se # set lower bond of transforemd data 
+ts.plot(qt.bc, xlim=c(1,length(qt.bc)+12), ylim = c(min(qt.bc),max(U.tr)),main="forecast of transformed data using model A ");lines(U.tr,col="blue",lty="dashed");lines(L.tr,col="blue",lty="dashed");points((length(qt.bc)+1):(length(qt.bc)+12), pred.tr$pred, col="red") # plot forecst of transformed data 
+```
+
+This graph is the forecast of transformed data using our final SARIMA model and we plot 12 data points ahead. 
+```{r }
+pred.orig<-((pred.tr$pred)*lambda+1)^(1/lambda) #transform back to the original data 
+U=(U.tr*lambda+1)^(1/lambda) #set upper bond of original data 
+L=(L.tr*lambda+1)^(1/lambda) #set lower bond of original data 
+ts.plot(qt,xlim=c(1,length(qt)+12),ylim=c(min(qt),max(U)),main="forecast of original data using model A");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12),pred.orig,col="red") # plot forecst of original data 
+```
+
+This graph is the forecast of original data using our final SARIMA model and we plot 12 data points ahead.
+
+```{r }
+ts.plot(qt,xlim=c(180,length(qt)+12),ylim=c(40,max(U)),main="Zoomed Forecast of original Data using model A");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12),pred.orig,col="red") # plot zoomed forecast of original data 
+```
+
+```{r }
+ts.plot(qauselec,xlim=c(180,length(qauselec)+12),ylim=c(40,max(U)),col="red",main="Compare testing data and forecasting data ");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12), pred.orig, col="green") ; points((length(qt)+1):(length(qt)+12), pred.orig, col="black") # plot testing data and forecating data 
+```
+
+The comparison between testing data and forecasting data shows that testing data all fall within the confidence interval of forecasting data, which proves that our final model is well fitted.
+
+<font size = "6"> Conclusion </font>
+
+The final model of electricity production in Australia is (1-0.461<sub>(0.2012)</sub>B)(1-0.479<sub>(0.2965)</sub>(B^4) +0.2663<sub>(0.1410)</sub>(B^8)) (1-B)(1-(B^4))(3/2)*(X^(2/3) -1)
+ =(1-0.7623<sub>(0.2012)</sub>B)(1-1.175<sub>(0.3184)</sub>(B^4) +0.5144<sub>(0.1738)</sub>(B^8))Z<sub>t</sub> with $\sigma_{t}$^2=0.02619. 
+
+This SARIMA model is well fitted, but we discover that the residuals of this model seem to have non-linear dependence through checking diagnostics. This implies this model may be slightly off the linear trend we predicted. 
+
+In this model, the overall electricity production increases over time, which means people in Australian gradually have more demand of eletricity and probably they have more electric appliances in daily life. In addition. the production of electricity changes with seasons. The production in summer is generally higher than that in winter, and we can infer that's because people's demand of electricity in summer is higher since they need to turn on the air conditioner in hot weather. This model implies the demand of electricity in Australia will increase continuously and probably Australian government need to build more power station to meet the demand. 
+
+Thanks Professor Raya Feldman for solving my question on non-linear dependence.
+
+<font size = "6"> Reference </font>
+
+"qauselec:Quarterly Australian Electricity producton",Australian Bureau of Statistics", Cat.8301.0.55.001, https://rdrr.io/cran/fpp2/man/qauselec.html
+
+<font size = "6"> Appendix </font>
+
+qauselec.csv=read.table("qauselec.csv",
+                    sep=",",header=FALSE, skip=1, nrows=218)  #import data 
+                    
+qauselec=ts(qauselec.csv[,3]) 
+
+tsdat<-ts(qauselec.csv[,3],start=c(1956,1),frequency=4)
+
+ts.plot(tsdat,main="Raw Data")  #plot raw data 
+
+plot(qauselec,main="Raw Data with mean and trend ");abline(lm(qauselec~as.numeric(1:length(qauselec))),col="red");abline(h=mean(qauselec),col="blue") #plot raw data with mean and trend
+
+qt<-qauselec[c(1:206)] #set training data set
+
+q.test<-qauselec[c(207:218)]  #set testing data set 
+
+plot.ts(qt,main="training data with mean and trend");abline(lm(qt~as.numeric(1:length(qt))),col="red");abline(h=mean(qauselec),col="blue") #plot training data with mean and trend
+
+hist(qt,col="light blue",xlab="",main="histogram;electricity production data") #plot histogram of training data 
+
+acf(qt,lag.max=40,main="ACF of the electricity production data") #plot acf of training data 
+
+library(MASS)
+
+bcTransform<-boxcox(qt~as.numeric(1:length(qt)),plotit=TRUE) # plot box-cox graph
+
+lambda=bcTransform$x[which(bcTransform$y==max(bcTransform$y))] # compute the lambda value
+
+qt.bc=(1/lambda)*(qt^lambda-1) # box-cox transformation 
+
+var(qt)# variance of original data 
+
+var(qt.bc) # variance of box-cox transformed data 
+
+op<-par(mfrow=c(1,2))
+
+ts.plot(qt,main="Original data",ylab=expression(X[t])) 
+
+ts.plot(qt.bc,main="Box-Cox transformed data", ylab=expression(Y[x]))  #plot box-cox transformed data time series graph
+
+hist(qt,col="light blue", xlab="",main="histogram;qt") 
+
+hist(qt.bc,col="light blue", xlab="",main="histogram;bc(qt)")  #plot box-cox transfored data hisgrtam 
+
+qt.bc_4<-diff(qt.bc,lag=4)  #difference data at lag 4
+
+plot.ts(qt.bc_4,main="bc(qt) differenced at lag
+4");abline(lm(qt.bc_4~as.numeric(1:length(qt.bc_4))),col="red");abline(h=mean(qt.bc_4,col="blue"))  #plot differenced data at lag 4
+
+var(qt.bc)
+
+var(qt.bc_4) #variance of differenced data at lag 4 
+
+qt.stat<-diff(qt.bc_4,lag=1) # difference data at lag 4 and lag 1 
+
+plot.ts(qt.stat,main="bc(qt) differenced at lag 4 and lag 1");abline(lm(qt.stat~as.numeric(1:length(qt.stat))),col="red");abline(h=mean(qt.stat,col="blue")) # plot differenced data at lag 4 and lag1
+
+var(qt.stat) #variance of differenced data at lag 4 and lag 1
+
+op<-par(mfrow=c(1,2))
+
+acf(qt.bc,lag.max=40,main="ACF of the bc(qt)") #acf of box-cox transformed data 
+
+acf(qt.bc_4,lag.max=40,main="ACF of the bc(qt), differenced at 4") #acf of differenced data at lag 4
+
+acf(qt.stat,lag.max=40,main="ACF of the bc(qt), differenced at 4 and 1")  #acf of differenced data at lag 4 and lag 1 
+
+par(op)
+
+op<-par(mfrow=c(1,2))
+
+hist(qt.bc,col="light blue", xlab="",main="histogram;bc(qt)") #histogram of differenced data at lag 4
+
+hist(qt.stat,col="light blue",xlab="", main="histogram;differenced bc(qt)") #histogram of differenced data at lag 4 and lag 1 
+
+par(op)
+
+acf(qt.stat,lag.max=40,main="ACF of the bc(qt), differenced at 4 and 1") # plot acf and check significant lag in acf 
+pacf(qt.stat,lag.max=40,main="PACF of the bc(qt), differenced at 4 and 1") # plot pacf and check significant lag in pacf
+
+library(qpcR)
+
+arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,1),period=4),method="ML")  #estimate SMA model coefficient 
+
+AICc(arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,1),period=4),method="ML")) # compute AICc of particular SMA model
+
+arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,2),period=4),method="ML")
+
+AICc(arima(qt.bc,order=c(0,1,1),seasonal = list(order=c(0,1,2),period=4),method="ML"))
+
+arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(1,1,0),period=4),method="ML")  #estimate SAR model coefficient
+
+AICc(arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(1,1,0),period=4),method="ML"))# compute AICc of particular SAR model
+
+arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(2,1,0),period=4),method="ML")
+
+AICc(arima(qt.bc,order=c(1,1,0),seasonal = list(order=c(2,1,0),period=4),method="ML"))
+
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),method="ML")#estimate SARIMA model coefficient
+
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),method="ML"))# compute AICc of particular SARIMA model
+
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,2),period=4),method="ML")
+
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),fixed=c(NA,NA,0,NA),method="ML") # estimate fixed SARIMA model coefficient 
+
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,1),period=4),fixed=c(NA,NA,0,NA),method="ML")) # compute AICc of fixed SARIMA model
+
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(1,1,2),period=4),method="ML"))
+
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,1),period=4),method="ML")
+
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,1),period=4),method="ML"))
+
+arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,2),period=4),method="ML")
+
+AICc(arima(qt.bc,order=c(1,1,1),seasonal = list(order=c(2,1,2),period=4),method="ML"))
+
+library(UnitCircle)
+
+uc.check(pol_=c(1,-1.175,0.5144),plot_output=TRUE) #check roots of SMA part in model A 
+
+uc.check(pol_=c(1,-0.479,0.2663),plot_output=TRUE) # check roots of SAR part in model A 
+
+uc.check(pol_=c(1,0.1748,0.2144),plot_output=TRUE) #check roots of SAR part in model B
+
+fit<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,2),period=4),method="ML")
+
+res<-residuals(fit)
+
+m<-mean(res)
+
+std<-sqrt(var(res))
+
+hist(res,density=20,breaks=20,col="blue",xlab="",prob=TRUE,main="histogram of residuals");curve(dnorm(x,m,std),add=TRUE) #plot the histogram of residuals in model A 
+
+plot.ts(res);abline(lm(res~as.numeric(1:length(res))),col="red");abline(h=mean(res),col="blue")# plot the time-series graph of residuals in model A 
+
+qqnorm(res,main="Normal Q-Q Plot for model A");qqline(res,col="blue") # plot the norm Q-Q plot
+
+op<-par(mfrow=c(1,2))
+
+acf(res,lag.max=40,main="ACF of res_A") #plot acf of residuals in model A 
+
+pacf(res,lag.max=40,main="PACF of res_A") #plot acf of residuals in model A 
+
+par(op)
+
+shapiro.test(res) #shapiro test of model A 
+
+Box.test(res, lag = 15 , type = c("Box-Pierce"), fitdf = 2)  # Box-Pierce test of model A 
+
+Box.test(res, lag = 15, type = c("Ljung-Box"), fitdf = 2) # Ljung-Box test of model A 
+
+Box.test(res^2, lag = 15, type = c("Ljung-Box"), fitdf = 0) # Mcleod-Li tst of model A 
+
+acf(res^2,lag.max=40) # plot acf of residual sqaure of model A 
+
+ar(res, aic = TRUE, order.max = NULL, method = c("yule-walker")) #estimate the model of residuals using yule-walker method 
+
+fitt<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,1),period=4),method="ML")
+
+ress<-residuals(fitt)
+
+m<-mean(ress)
+
+std<-sqrt(var(ress))
+
+hist(ress,density=20,breaks=20,col="blue",xlab="",prob=TRUE);curve(dnorm(x,m,std),add=TRUE)
+
+plot.ts(ress);abline(lm(ress~as.numeric(1:length(ress))),col="red");abline(h=mean(ress),col="blue")
+
+qqnorm(ress,main="Normal Q-Q Plot for model B");qqline(ress,col="blue")
+
+op<-par(mfrow=c(1,2))
+
+acf(ress,lag.max=40)
+
+pacf(ress,lag.max=40)
+
+par(op)
+
+shapiro.test(ress)
+
+Box.test(ress, lag = 15 , type = c("Box-Pierce"), fitdf = 2)
+
+Box.test(ress, lag = 15, type = c("Ljung-Box"), fitdf = 2)
+
+Box.test(ress^2, lag = 15, type = c("Ljung-Box"), fitdf = 0)
+
+acf(ress^2,lag.max=40)
+
+ar(ress, aic = TRUE, order.max = NULL, method = c("yule-walker"))
+
+library(forecast)
+
+fit.A<-arima(qt.bc,order=c(1,1,1),seasonal=list(order=c(2,1,2),period=4),method="ML") #fit our final model 
+
+forecast(fit.A)  
+
+pred.tr<-predict(fit.A,n.ahead=12) # forecast 12 data points 
+
+U.tr=pred.tr$pred+2*pred.tr$se #set upper bond of transforemd data 
+
+L.tr=pred.tr$pred-2*pred.tr$se # set lower bond of transforemd data 
+
+ts.plot(qt.bc, xlim=c(1,length(qt.bc)+12), ylim = c(min(qt.bc),max(U.tr)),main="forecast of transformed data using model A ");lines(U.tr,col="blue",lty="dashed");lines(L.tr,col="blue",lty="dashed");points((length(qt.bc)+1):(length(qt.bc)+12), pred.tr$pred, col="red") # plot forecst of transformed data 
+
+pred.orig<-((pred.tr$pred)*lambda+1)^(1/lambda) #transform back to the original data 
+
+U=(U.tr*lambda+1)^(1/lambda) #set upper bond of original data 
+
+L=(L.tr*lambda+1)^(1/lambda) #set lower bond of original data 
+
+ts.plot(qt,xlim=c(1,length(qt)+12),ylim=c(min(qt),max(U)),main="forecast of original data using model A");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12),pred.orig,col="red") # plot forecst of original data 
+
+ts.plot(qt,xlim=c(180,length(qt)+12),ylim=c(40,max(U)),main="Zoomed Forecast of original Data using model
+A");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12),pred.orig,col="red") # plot zoomed forecast of original data 
+
+ts.plot(qauselec,xlim=c(180,length(qauselec)+12),ylim=c(40,max(U)),col="red",main="Compare testing data and forecasting data ");lines(U,col="blue",lty="dashed");lines(L,col="blue",lty="dashed");points((length(qt)+1):(length(qt)+12), pred.orig, col="green") ; points((length(qt)+1):(length(qt)+12), pred.orig, col="black") # plot testing data and forecating data 
+
